@@ -100,7 +100,11 @@ def _resolve_pricing() -> float:
     try:
         return fetch_price_per_byte()
     except (OSError, ValueError, RuntimeError, GoogleAPICallError) as exc:
-        logger.warning("Live pricing unavailable, using fallback", exc_type=type(exc).__name__, reason=str(exc).split("\n")[0])
+        logger.warning(
+            "Live pricing unavailable, using fallback",
+            exc_type=type(exc).__name__,
+            reason=str(exc).split("\n", maxsplit=1)[0],
+        )
         return get_fallback_price_per_byte()
 
 

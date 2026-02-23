@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from capacity import TiB, byte
-from google.api_core.exceptions import Forbidden
+from google.api_core.exceptions import BadRequest, Forbidden
 from google.cloud.bigquery import QueryJobConfig
 from pydantic import ValidationError
 
@@ -168,13 +168,11 @@ def test_is_bytes_billed_exceeded_returns_false_for_empty_errors():
 
 
 def test_guard_project_errors_raises_value_error_for_missing_project():
-    from google.api_core.exceptions import BadRequest
     with pytest.raises(ValueError, match="GCP project not found or inaccessible"), _guard_project_errors():
         raise BadRequest("400 POST ...: ProjectId must be non-empty")
 
 
 def test_guard_project_errors_reraises_other_bad_requests():
-    from google.api_core.exceptions import BadRequest
     with pytest.raises(BadRequest), _guard_project_errors():
         raise BadRequest("400 Syntax error at line 1")
 

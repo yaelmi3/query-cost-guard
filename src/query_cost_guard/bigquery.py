@@ -168,7 +168,7 @@ class QueryCostGuard:
             logger.warning(
                 "Live pricing unavailable, using static fallback",
                 exc_type=type(exc).__name__,
-                reason=str(exc).split("\n")[0],
+                reason=str(exc).split("\n", maxsplit=1)[0],
             )
             price_per_byte = get_fallback_price_per_byte()
 
