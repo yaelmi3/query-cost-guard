@@ -23,11 +23,8 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
-      - name: Install build tools
-        run: uv pip install build --system
-
       - name: Build package
-        run: python -m build
+        run: uv build
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
