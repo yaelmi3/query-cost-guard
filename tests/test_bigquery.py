@@ -7,7 +7,13 @@ from google.api_core.exceptions import Forbidden
 from google.cloud.bigquery import QueryJobConfig
 from pydantic import ValidationError
 
-from query_cost_guard.bigquery import QueryCostGuard, QueryParams, _guard_project_errors, _is_bytes_billed_exceeded, _merge_job_config
+from query_cost_guard.bigquery import (
+    QueryCostGuard,
+    QueryParams,
+    _guard_project_errors,
+    _is_bytes_billed_exceeded,
+    _merge_job_config,
+)
 from query_cost_guard.constants import OnPricingFailure
 from query_cost_guard.exceptions import PricingUnavailableError, QueryCostExceededError
 
@@ -163,16 +169,14 @@ def test_is_bytes_billed_exceeded_returns_false_for_empty_errors():
 
 def test_guard_project_errors_raises_value_error_for_missing_project():
     from google.api_core.exceptions import BadRequest
-    with pytest.raises(ValueError, match="GCP project not found or inaccessible"):
-        with _guard_project_errors():
-            raise BadRequest("400 POST ...: ProjectId must be non-empty")
+    with pytest.raises(ValueError, match="GCP project not found or inaccessible"), _guard_project_errors():
+        raise BadRequest("400 POST ...: ProjectId must be non-empty")
 
 
 def test_guard_project_errors_reraises_other_bad_requests():
     from google.api_core.exceptions import BadRequest
-    with pytest.raises(BadRequest):
-        with _guard_project_errors():
-            raise BadRequest("400 Syntax error at line 1")
+    with pytest.raises(BadRequest), _guard_project_errors():
+        raise BadRequest("400 Syntax error at line 1")
 
 
 @patch("query_cost_guard.bigquery.fetch_price_per_byte", return_value=FALLBACK_PRICE_PER_BYTE)

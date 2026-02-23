@@ -7,10 +7,9 @@ from typing import Annotated
 import structlog
 import typer
 from capacity import TiB, byte
+from google.api_core.exceptions import GoogleAPICallError
 from google.cloud.bigquery import Client, QueryJobConfig
 from google.oauth2 import service_account
-
-from google.api_core.exceptions import GoogleAPICallError
 
 from query_cost_guard.bigquery import _guard_project_errors
 from query_cost_guard.pricing import fetch_price_per_byte, get_fallback_price_per_byte
