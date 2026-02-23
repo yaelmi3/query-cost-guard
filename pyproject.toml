@@ -25,6 +25,11 @@ dependencies = [
     "structlog>=25.5,<26",
 ]
 
+[project.urls]
+Homepage = "https://github.com/yaelmi3/query-cost-guard"
+Repository = "https://github.com/yaelmi3/query-cost-guard"
+Changelog = "https://github.com/yaelmi3/query-cost-guard/blob/main/CHANGELOG.md"
+
 [project.scripts]
 query-cost-guard = "query_cost_guard.cli:app"
 
