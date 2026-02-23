@@ -1,7 +1,9 @@
+from contextlib import contextmanager
+
 import structlog
 from cachetools import TTLCache
 from capacity import TiB, byte
-from google.api_core.exceptions import Forbidden
+from google.api_core.exceptions import BadRequest, Forbidden, GoogleAPICallError
 from google.cloud.bigquery import Client, QueryJobConfig
 from pydantic import BaseModel, Field, model_validator
 
@@ -60,9 +62,12 @@ class QueryCostGuard:
         merged_config = _merge_job_config(job_config=job_config, maximum_bytes_billed=resolved_max_bytes)
 
         try:
-            query_job = self._client.query(sql, job_config=merged_config, location=location)
+            with _guard_project_errors():
+                query_job = self._client.query(sql, job_config=merged_config, location=location)
             rows = [dict(row) for row in query_job.result()]
         except Forbidden as exc:
+            if not _is_bytes_billed_exceeded(exc):
+                raise
             self._handle_cost_exceeded(
                 params=params,
                 resolved_max_bytes=resolved_max_bytes,
@@ -84,7 +89,8 @@ class QueryCostGuard:
         dry_run_config.dry_run = True
         dry_run_config.use_query_cache = False
 
-        dry_run_job = self._client.query(sql, job_config=dry_run_config, location=location)
+        with _guard_project_errors():
+            dry_run_job = self._client.query(sql, job_config=dry_run_config, location=location)
         estimated_bytes = dry_run_job.total_bytes_processed
 
         return EstimateResult(
@@ -156,10 +162,14 @@ class QueryCostGuard:
 
         try:
             price_per_byte = fetch_price_per_byte()
-        except (OSError, ValueError, RuntimeError) as exc:
+        except (OSError, ValueError, RuntimeError, GoogleAPICallError) as exc:
             if self._on_pricing_failure == OnPricingFailure.RAISE:
                 raise PricingUnavailableError(reason=str(exc)) from exc
-            logger.warning("Live pricing unavailable, using static fallback", reason=str(exc))
+            logger.warning(
+                "Live pricing unavailable, using static fallback",
+                exc_type=type(exc).__name__,
+                reason=str(exc).split("\n")[0],
+            )
             price_per_byte = get_fallback_price_per_byte()
 
         self._pricing_cache["price_per_byte"] = price_per_byte
@@ -170,3 +180,19 @@ def _merge_job_config(*, job_config: QueryJobConfig | None, maximum_bytes_billed
     config = job_config or QueryJobConfig()
     config.maximum_bytes_billed = maximum_bytes_billed
     return config
+
+
+def _is_bytes_billed_exceeded(exc: Forbidden) -> bool:
+    return any(error.get("reason") == "billingTierLimitExceeded" for error in (exc.errors or []))
+
+
+@contextmanager
+def _guard_project_errors():
+    try:
+        yield
+    except BadRequest as exc:
+        if "ProjectId must be non-empty" in str(exc):
+            raise ValueError(
+                "GCP project not found or inaccessible. Verify the project ID is correct."
+            ) from exc
+        raise

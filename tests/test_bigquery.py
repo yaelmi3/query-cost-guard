@@ -7,7 +7,7 @@ from google.api_core.exceptions import Forbidden
 from google.cloud.bigquery import QueryJobConfig
 from pydantic import ValidationError
 
-from query_cost_guard.bigquery import QueryCostGuard, QueryParams, _merge_job_config
+from query_cost_guard.bigquery import QueryCostGuard, QueryParams, _guard_project_errors, _is_bytes_billed_exceeded, _merge_job_config
 from query_cost_guard.constants import OnPricingFailure
 from query_cost_guard.exceptions import PricingUnavailableError, QueryCostExceededError
 
@@ -118,9 +118,12 @@ def test_query_returns_query_result_with_metrics(_mock_pricing):
 
 
 @patch("query_cost_guard.bigquery.fetch_price_per_byte", return_value=FALLBACK_PRICE_PER_BYTE)
-def test_query_raises_query_cost_exceeded_on_forbidden(_mock_pricing):
+def test_query_raises_query_cost_exceeded_on_billing_tier_limit(_mock_pricing):
     client = MagicMock()
-    client.query.side_effect = Forbidden("Query exceeded limit")
+    client.query.side_effect = Forbidden(
+        "Query exceeded the maximum bytes billed",
+        errors=[{"reason": "billingTierLimitExceeded", "domain": "usageLimits", "message": "..."}],
+    )
     guard = QueryCostGuard(client=client)
 
     with pytest.raises(QueryCostExceededError) as exc_info:
@@ -128,6 +131,48 @@ def test_query_raises_query_cost_exceeded_on_forbidden(_mock_pricing):
 
     assert exc_info.value.context.query_tag == "expensive"
     assert exc_info.value.context.max_cost_usd == 0.01
+
+
+@patch("query_cost_guard.bigquery.fetch_price_per_byte", return_value=FALLBACK_PRICE_PER_BYTE)
+def test_query_reraises_forbidden_on_permission_error(_mock_pricing):
+    client = MagicMock()
+    client.query.side_effect = Forbidden(
+        "Access Denied: Table my-project:dataset.table",
+        errors=[{"reason": "accessDenied", "domain": "global", "message": "..."}],
+    )
+    guard = QueryCostGuard(client=client)
+
+    with pytest.raises(Forbidden):
+        guard.query(sql="SELECT *", params=QueryParams(max_cost_usd=0.01))
+
+
+def test_is_bytes_billed_exceeded_returns_true_for_billing_tier_limit():
+    exc = Forbidden("msg", errors=[{"reason": "billingTierLimitExceeded"}])
+    assert _is_bytes_billed_exceeded(exc) is True
+
+
+def test_is_bytes_billed_exceeded_returns_false_for_other_errors():
+    exc = Forbidden("msg", errors=[{"reason": "accessDenied"}])
+    assert _is_bytes_billed_exceeded(exc) is False
+
+
+def test_is_bytes_billed_exceeded_returns_false_for_empty_errors():
+    exc = Forbidden("msg")
+    assert _is_bytes_billed_exceeded(exc) is False
+
+
+def test_guard_project_errors_raises_value_error_for_missing_project():
+    from google.api_core.exceptions import BadRequest
+    with pytest.raises(ValueError, match="GCP project not found or inaccessible"):
+        with _guard_project_errors():
+            raise BadRequest("400 POST ...: ProjectId must be non-empty")
+
+
+def test_guard_project_errors_reraises_other_bad_requests():
+    from google.api_core.exceptions import BadRequest
+    with pytest.raises(BadRequest):
+        with _guard_project_errors():
+            raise BadRequest("400 Syntax error at line 1")
 
 
 @patch("query_cost_guard.bigquery.fetch_price_per_byte", return_value=FALLBACK_PRICE_PER_BYTE)

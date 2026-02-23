@@ -1,6 +1,6 @@
 [project]
 name = "query-cost-guard"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Per-query cost guard for cloud databases. Set dollar or byte limits before any query runs."
 license = {text = "MIT"}
 requires-python = ">=3.11"
@@ -17,23 +17,26 @@ classifiers = [
     "Topic :: Database",
 ]
 dependencies = [
-    "google-cloud-bigquery~=3.27.0",
-    "google-cloud-billing~=1.15.0",
-    "pydantic~=2.10.0",
-    "cachetools~=7.0.1",
-    "capacity~=1.3.14",
-    "structlog~=25.5.0",
+    "google-cloud-bigquery>=3.27,<4",
+    "google-cloud-billing>=1.15,<2",
+    "pydantic>=2.10,<3",
+    "cachetools>=7.0,<8",
+    "capacity>=1.3,<2",
+    "structlog>=25.5,<26",
 ]
 
 [project.scripts]
 query-cost-guard = "query_cost_guard.cli:app"
 
 [project.optional-dependencies]
-cli = ["typer~=0.24.0"]
+cli = ["typer>=0.24,<1"]
 dev = ["pytest", "pytest-mock", "ruff>=0.1.0", "pylint>=3.0.0"]
 
+[tool.hatch.version]
+source = "vcs"
+
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [tool.ruff]

@@ -1,4 +1,5 @@
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Annotated
@@ -7,7 +8,11 @@ import structlog
 import typer
 from capacity import TiB, byte
 from google.cloud.bigquery import Client, QueryJobConfig
+from google.oauth2 import service_account
 
+from google.api_core.exceptions import GoogleAPICallError
+
+from query_cost_guard.bigquery import _guard_project_errors
 from query_cost_guard.pricing import fetch_price_per_byte, get_fallback_price_per_byte
 
 logger = structlog.get_logger()
@@ -41,7 +46,8 @@ def estimate(
     price_per_byte = _resolve_pricing()
 
     job_config = QueryJobConfig(dry_run=True, use_query_cache=False)
-    dry_run_job = bq_client.query(sql, job_config=job_config)
+    with _guard_project_errors():
+        dry_run_job = bq_client.query(sql, job_config=job_config)
     estimated_bytes = dry_run_job.total_bytes_processed
     estimated_cost = estimated_bytes * price_per_byte
     price_per_tib = price_per_byte * TIB_IN_BYTES
@@ -84,15 +90,18 @@ def _build_client(*, project: str | None, credentials: Path | None) -> Client:
     if project:
         kwargs["project"] = project
     if credentials:
-        kwargs["client_options"] = {"credentials_file": str(credentials)}
+        kwargs["credentials"] = service_account.Credentials.from_service_account_file(
+            str(credentials),
+            scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        )
     return Client(**kwargs)
 
 
 def _resolve_pricing() -> float:
     try:
         return fetch_price_per_byte()
-    except (OSError, ValueError, RuntimeError) as exc:
-        logger.warning("Live pricing unavailable, using fallback", exc_type=type(exc).__name__, exc_detail=str(exc))
+    except (OSError, ValueError, RuntimeError, GoogleAPICallError) as exc:
+        logger.warning("Live pricing unavailable, using fallback", exc_type=type(exc).__name__, reason=str(exc).split("\n")[0])
         return get_fallback_price_per_byte()
 
 
@@ -122,7 +131,7 @@ def _print_human(
     max_cost: float | None,
 ) -> None:
     typer.echo(f"Estimated bytes:  {estimated_bytes:,}")
-    typer.echo(f"Estimated cost:   ${estimated_cost:.4f} (at ${price_per_tib:.2f}/TiB)")
+    typer.echo(f"Estimated cost:   {_format_cost(estimated_cost)} (at ${price_per_tib:.2f}/TiB)")
 
     if max_cost is not None:
         passed = estimated_cost <= max_cost
@@ -130,3 +139,12 @@ def _print_human(
         typer.echo(f"Guard:            {symbol} (limit ${max_cost:.2f})")
         if not passed:
             raise typer.Exit(code=1)
+
+
+def _format_cost(cost: float) -> str:
+    if cost == 0:
+        return "$0.00"
+    if cost >= 0.01:
+        return f"${cost:.4f}"
+    decimals = max(4, -math.floor(math.log10(cost)) + 1)
+    return f"${cost:.{decimals}f}"
